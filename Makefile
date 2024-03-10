@@ -5,14 +5,12 @@ CFLAGS = -Wall -Wextra -pedantic
 
 all: main
 
-server: main.o 
+main: main.o 
 	$(CC) $(CFLAGS) -o $@ $^
+	@echo "Setting Capabilities"; sudo setcap cap_net_admin,cap_net_raw=eip $@
 
 %.0: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-setcap:
-	sudo setcap cap_net_admin,cap_net_raw=eip $(main)
-
 clean:
-	rm -f  main *.0
+	rm -f  main *.o

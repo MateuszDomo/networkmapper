@@ -36,7 +36,7 @@ int main() {
         printf("%s\n", strerror(errno));
         close(sockFD);
     }
-    
+
     struct icmp packet;
     memset(&packet, 0, sizeof(packet));
     packet.type = 0x08;
