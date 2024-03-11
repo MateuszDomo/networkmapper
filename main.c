@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 700
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
@@ -7,6 +8,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
+#include <time.h>
 
 struct icmp {
     uint8_t type;
@@ -17,7 +19,8 @@ struct icmp {
 };
 
 u_int16_t checksum(struct icmp* packet);
-int ping(int sockFD, char* address);
+int ping(int sock_fd, int count, struct sockaddr_in* addr, socklen_t addr_len);
+void printbytes(int bytes, char buffer[]);
 
 int main(int argc, char* argv[]) {
 
@@ -27,77 +30,97 @@ int main(int argc, char* argv[]) {
     }
 
     char* cmd =  argv[1];
-    char* destAddress =  argv[2];
+    char* dest_address_str =  argv[2];
 
-    int sockFD = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (sockFD == -1) {
+    int sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sock_fd == -1) {
         printf("%s\n", strerror(errno));
-        close(sockFD);
+        close(sock_fd);
         return 1;
     }
-
-    if (ping(sockFD, destAddress) == -1) {
+    
+    struct sockaddr_in  destination_address;
+    memset(&destination_address, 0, sizeof(destination_address));
+    destination_address.sin_family = AF_INET;
+    destination_address.sin_port = 0;
+    if (inet_pton(AF_INET, dest_address_str, &destination_address.sin_addr) == -1) {
         printf("%s\n", strerror(errno));
-        close(sockFD);
+        close(sock_fd);
+        return -1;
+    }
+    
+    if (ping(sock_fd, 3, &destination_address, sizeof(destination_address)) == -1) {
+        printf("%s\n", strerror(errno));
+        close(sock_fd);
         return -1;
     }
 
-    close(sockFD);
+    close(sock_fd);
     return 0;
 }
 
-int ping(int sockFD, char* address) {
+int ping(int sock_fd, int count, struct sockaddr_in* addr, socklen_t addr_len) {
     struct icmp packet;
-    memset(&packet, 0, sizeof(packet));
-    packet.type = 0x08;
-    packet.code = 0x0;
-    packet.identifier = htons(0x11);
-    packet.sequenceNumber = htons(0x01);
-    packet.checksum = checksum(&packet);
+    struct icmp recvpacket;
+    struct timespec start, end;
+    float msg_delay_sum = 0.0;
+    char res_buffer[1024];
+    int sequence_num = 0;
+    for (int i = 0; i < count; i++) {
+        // Construct packet
+        memset(&packet, 0, sizeof(packet));
+        packet.type = 0x08;
+        packet.code = 0x0;
+        packet.identifier = htons(0x11);
+        packet.sequenceNumber = htons(++sequence_num);
+        packet.checksum = checksum(&packet);
 
-    struct sockaddr_in  destinationAddress;
-    socklen_t destAddrLen = sizeof(destinationAddress);
-    memset(&destinationAddress, 0, sizeof(destinationAddress));
-    destinationAddress.sin_family = AF_INET;
-    destinationAddress.sin_port = 0;
-    if (inet_pton(AF_INET, address, &destinationAddress.sin_addr) == -1) {
-        return -1;
-    }
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        int bytesSent = sendto(sock_fd, &packet, sizeof(packet), 0, (const struct sockaddr *)addr, addr_len);
+        if (bytesSent == -1) {
+            return -1;
+        }
+        
+        memset(&res_buffer, 0, sizeof(res_buffer));
+        int bytes_received = recvfrom(sock_fd, &res_buffer, sizeof(res_buffer), 0, (struct sockaddr *)addr, &addr_len);
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        if (bytes_received == -1) {
+            return -1;
+        }
 
-    int bytesSent = sendto(sockFD, &packet, sizeof(packet), 0, (const struct sockaddr *)&destinationAddress, destAddrLen);
-    if (bytesSent == -1) {
-        return 1;
-    }
-    printf("Sent %d bytes\n", bytesSent);
+        memcpy(&recvpacket, &res_buffer[20], sizeof(recvpacket));
+        if (recvpacket.type != 0) {
+            printf("Destination Host Unreachable\n");
+            return 0;
+        }
 
-    char buffer[1024];
-    memset(&buffer, 0, sizeof(buffer));
-    printf("%ld\n", sizeof(buffer));
-    int bytesReceived = recvfrom(sockFD, &buffer, sizeof(buffer), 0, (struct sockaddr *)&destinationAddress, &destAddrLen);
-    if (bytesReceived == -1) {
-        return -1;
+        double diff = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1000000000.0;
+        msg_delay_sum += diff;
     }
-    printf("Received %d bytes\n", bytesReceived);
-    for (int i = 0; i < bytesReceived; i++) {
+    printf("%f\n", msg_delay_sum/count);
+    return 0;
+}
+
+void printbytes(int bytes, char buffer[]) {
+    for (int i = 0; i < bytes; i++) {
         printf("%02X ", (unsigned char)buffer[i]);
     }
     printf("\n");
-    return 0;
 }
 
 u_int16_t checksum(struct icmp *packet) {
-    uint16_t *startByte = (uint16_t *)packet;
+    uint16_t *byte_ptr = (uint16_t *)packet;
     uint16_t sum = 0;
 
     int count = sizeof(*packet);
     while (count > 1) {
-        sum += *startByte;
-        startByte++;
+        sum += *byte_ptr;
+        byte_ptr++;
         count -= 2;
     }
 
     if (count > 0) {
-        sum += *(uint8_t *)startByte;
+        sum += *(uint8_t *)byte_ptr;
     }
 
     return ~sum;
