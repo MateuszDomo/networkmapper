@@ -16,7 +16,18 @@ struct icmp {
     uint16_t sequenceNumber;
 };
 
-int main() {
+u_int16_t checksum(struct icmp *packet);
+
+int main(int argc, char *argv[]) {
+
+    if (argc != 3) {
+        printf("Incorrect Arguments\n");
+        return 1;
+    }
+
+    char *cmd =  argv[1];
+    char *destAddress =  argv[2];
+
     char hostnameBuffer[256];
     if (gethostname(hostnameBuffer, sizeof(hostnameBuffer)) == -1) {
         printf("%s\n", strerror(errno));
@@ -35,21 +46,25 @@ int main() {
     if (sockFD == -1) {
         printf("%s\n", strerror(errno));
         close(sockFD);
+        return 1;
     }
 
     struct icmp packet;
     memset(&packet, 0, sizeof(packet));
     packet.type = 0x08;
     packet.code = 0x0;
-    //checksum
     packet.identifier = 0x1234;
     packet.sequenceNumber = 0x1;
+    packet.checksum = checksum(&packet);
 
     struct sockaddr_in  destinationAddress;
     memset(&destinationAddress, 0, sizeof(destinationAddress));
     destinationAddress.sin_family = AF_INET;
     destinationAddress.sin_port = 0;
-    inet_pton(AF_INET, "10.0.0.8", &destinationAddress.sin_addr);
+    if (inet_pton(AF_INET, destAddress, &destinationAddress.sin_addr) == -1) {
+        printf("%s\n", strerror(errno));
+        close(sockFD);
+    }
 
     int bytesSent = sendto(sockFD, &packet, sizeof(packet), 0, (const struct sockaddr *)&destinationAddress, sizeof(destinationAddress));
     if (bytesSent == -1) {
@@ -58,6 +73,25 @@ int main() {
         return 1;
     }
 
+    printf("Sent %d bytes\n", bytesSent);
     close(sockFD);
     return 0;
+}
+
+u_int16_t checksum(struct icmp *packet) {
+    uint16_t *startByte = (uint16_t *)packet;
+    uint16_t sum = 0;
+
+    int count = sizeof(*packet);
+    while (count > 1) {
+        sum += *startByte;
+        startByte++;
+        count -= 2;
+    }
+
+    if (count > 0) {
+        sum += *(uint8_t *)startByte;
+    }
+
+    return ~sum;
 }
