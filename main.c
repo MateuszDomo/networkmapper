@@ -1,4 +1,5 @@
-#define _XOPEN_SOURCE 700
+#define _XOPEN_SOURCE 600
+#define _POSIX_C_SOURCE 200112L
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
@@ -27,11 +28,6 @@ int ping_cmd(char* addr_str, int count);
 int create_sockaddr_in(char* addr_str, struct sockaddr_in* destination_address);
 
 int main(int argc, char* argv[]) {
-
-    if (argc != 4) {
-        printf("Incorrect Arguments\n");
-        return 1;
-    }
 
     char* cmd =  argv[1];
     char* dest_address_str =  argv[2];
@@ -102,18 +98,18 @@ int ping(int sock_fd, int count, struct sockaddr_in* addr, socklen_t addr_len) {
         packet.checksum = checksum(&packet);
 
         clock_gettime(CLOCK_MONOTONIC, &start);
-        int bytesSent = sendto(sock_fd, &packet, sizeof(packet), 0, (const struct sockaddr *)addr, addr_len);
-        if (bytesSent == -1) {
+        int bytes_sent = sendto(sock_fd, &packet, sizeof(packet), 0, (const struct sockaddr *)addr, addr_len);
+        if (bytes_sent == -1) {
             return -1;
         }
-
-        struct timeval timeout = {0, 1000000};
+    
+        struct timeval timeout = {0, 5000000};
         int ready = select(sock_fd + 1, &fdset, NULL, NULL, &timeout);
-
         if (ready == -1) {
             return -1;
         } else if (ready == 0) {
             packets_lost++;
+            printf("Packet Lost\n");
             continue;
         }
 
@@ -132,10 +128,11 @@ int ping(int sock_fd, int count, struct sockaddr_in* addr, socklen_t addr_len) {
 
         double diff = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1000000000.0;
         msg_delay_sum += diff;
-        sleep(1);
+        printf("Packet Success %f\n", diff);
     }
-    printf("%f\n", msg_delay_sum/count);
-    printf("%d lost out of %d\n", packets_lost, count);
+
+    printf("\nAverage Round Trip Time: %f\n", msg_delay_sum/count);
+    printf("%d lost out of %d packets\n", packets_lost, count);
     return 0;
 }
 
