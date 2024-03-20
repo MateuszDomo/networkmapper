@@ -26,22 +26,115 @@ int ping(int sock_fd, int count, struct sockaddr_in* addr, socklen_t addr_len);
 void printbytes(int bytes, char buffer[]);
 int ping_cmd(char* addr_str, int count);
 int create_sockaddr_in(char* addr_str, struct sockaddr_in* destination_address);
+int validate_address(char* address, char* cmd);
+int extractCIDR(char* addr);
 
 int main(int argc, char* argv[]) {
 
     char* cmd =  argv[1];
     char* dest_address_str =  argv[2];
 
+    if (argc < 3) {
+        printf("Invalid Arguments\n");
+        return 1;
+    }
+
     if (strcmp(cmd, "ping") == 0) {
-        if (ping_cmd(dest_address_str, atoi(argv[3])) == -1) {
-            printf("%s\n", strerror(errno));
+        if (argc != 4) {
+            printf("Invalid Arguments\n");
+            return 1;
+        }
+
+        char* err; 
+        int count = strtol(argv[3], &err, 10);
+        if (*err) {
+            printf("Ping count not a valid number: %s\n", err);
+            return 1;
+        }
+
+        if (!validate_address(dest_address_str, cmd) || ping_cmd(dest_address_str, count) == -1) {
+            if (errno) {
+                printf("%s\n", strerror(errno));
+            }
             return 1;
         }
     } else if (strcmp(cmd, "map") == 0) {
+        int cidr = extractCIDR(dest_address_str);
+        if (cidr == -1) {
+            if (errno) {
+                printf("%s\n", strerror(errno));
+            }
+            return -1;
+        }
 
+        if (!validate_address(dest_address_str, cmd)) {
+            if (errno) {
+                printf("%s\n", strerror(errno));
+            }
+            return 1;
+        }
+        printf("%d\n", cidr);
+        printf("%s\n", dest_address_str);
     }
 
     return 0;
+}
+
+// Removes CIDR from original address and returns it
+int extractCIDR(char* addr) {
+    char addr_cp[1024];
+    strncpy(addr_cp, addr, sizeof(addr_cp));
+
+    char* token = strtok(addr_cp, "/");    
+
+    strncpy(addr, token, 1024);
+
+    token = strtok(NULL, "/");    
+    if (token == NULL) {
+        return 0;
+    }
+
+    char* err; 
+    int cidr = strtol(token, &err, 10);
+    if (*err) {
+        printf("None valid CIDR: %s\n", err);
+        return -1;
+    }
+
+    token = strtok(NULL, "/");    
+    if (token != NULL) {
+        printf("CIDR strings along bullshit: %s\n", token);
+        return -1;
+    }
+
+    return cidr;
+}
+
+int validate_address(char* addr, char* cmd) {
+    char addr_cp[1024];
+    strncpy(addr_cp, addr, sizeof(addr_cp));
+    
+    char* token = strtok(addr_cp, ".");    
+    int octuples = 0;
+
+    while (token != NULL) {
+        char* err; 
+        int count = strtol(token, &err, 10);
+        if (*err || count < 0 || count > 255) {
+            printf("Octuple in address is not valid\n");
+            return 0;
+        }
+
+        octuples++;
+        token = strtok(NULL, ".");
+    }
+
+    if (octuples != 4) {
+        printf("Address Not Valid, Broke boy\n");
+        return 0;
+    }
+
+    return 1;
 }
 
 int create_sockaddr_in(char* addr_str, struct sockaddr_in* destination_address) {
@@ -51,12 +144,17 @@ int create_sockaddr_in(char* addr_str, struct sockaddr_in* destination_address) 
     return inet_pton(AF_INET, addr_str, &destination_address->sin_addr);
 }
 
+int map_cmd() {
+    // Check for host
+    return 0;
+}
+
 int ping_cmd(char* addr_str, int count) {
     int sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (sock_fd == -1) {
         printf("%s\n", strerror(errno));
         return -1;
-    }
+    } 
     struct timespec timeout;
     timeout.tv_sec = 5;  // 5 seconds timeout
     timeout.tv_nsec = 0;
@@ -121,7 +219,7 @@ int ping(int sock_fd, int count, struct sockaddr_in* addr, socklen_t addr_len) {
         }
 
         memcpy(&recvpacket, &res_buffer[20], sizeof(recvpacket));
-        if (recvpacket.type != 0) {
+        if (recvpacket.type != 0) { 
             printf("Destination Host Unreachable\n");
             return 0;
         }
